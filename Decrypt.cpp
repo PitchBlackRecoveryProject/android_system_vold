@@ -28,7 +28,6 @@
 #include <sys/types.h>
 
 #include <keyutils.h>
-#include "Weaver1.h"
 #include "cutils/properties.h"
 
 #include <openssl/sha.h>
@@ -85,6 +84,7 @@ extern "C" {
 #include "HashPassword.h"
 #include "KeystoreInfo.hpp"
 #include "KeyStorage.h"
+#include "Weaver1.h"
 #include "android/os/IVold.h"
 
 namespace apc = ::aidl::android::security::apc;
@@ -362,21 +362,43 @@ struct weaver_data_struct {
  * https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#768 */
 bool Get_Weaver_Data(const std::string& spblob_path, const std::string& handle_str, weaver_data_struct *wd) {
 	printf("Get_Weaver_Data\n");
-	std::string weaver_file = spblob_path + handle_str + ".weaver";
+	bool found_file = false;
 	std::string weaver_data;
-	if (!android::base::ReadFileToString(weaver_file, &weaver_data)) {
-		printf("Failed to read '%s'\n", weaver_file.c_str());
-		return false;
+	std::string file = spblob_path + handle_str + ".weaver";
+	if (android::vold::pathExists(file)) {
+		if (!android::base::ReadFileToString(file, &weaver_data)) {
+			printf("Failed to read '%s'\n", file.c_str());
+		} else
+			found_file = true;
+	} else {
+		printf("trying to read %s_file data with leading 0\n", file.c_str());
+		std::vector<std::string> file_paths = {
+			spblob_path + "0" + handle_str + ".weaver",
+			spblob_path + "00" + handle_str + ".weaver"
+		};
+		for (auto& file : file_paths) {
+			if (!android::base::ReadFileToString(file, &weaver_data)) {
+				printf("Failed to read '%s'\n", file.c_str());
+			} else {
+				found_file = true;
+				break;
+			}
+		}
 	}
-	// output_hex(weaver_data.data(), weaver_data.size());printf("\n");
-	const unsigned char* byteptr = (const unsigned char*)weaver_data.data();
-	wd->version = *byteptr;
-	// printf("weaver version %i\n", wd->version);
-	const int* intptr = (const int*)weaver_data.data() + sizeof(unsigned char);
-	wd->slot = *intptr;
-	//endianswap(&wd->slot); not needed
-	// printf("weaver slot %i\n", wd->slot);
-	return true;
+	if (found_file == false) {
+		printf("Get_Weaver_Data: No weaver file found for %s\n", handle_str.c_str());
+		return found_file;
+	} else {
+		// output_hex(weaver_data.data(), weaver_data.size());printf("\n");
+		const unsigned char* byteptr = (const unsigned char*)weaver_data.data();
+		wd->version = *byteptr;
+		// printf("weaver version %i\n", wd->version);
+		const int* intptr = (const int*)weaver_data.data() + sizeof(unsigned char);
+		wd->slot = *intptr;
+		//endianswap(&wd->slot); not needed
+		// printf("weaver slot %i\n", wd->slot);
+	}
+	return found_file;
 }
 
 namespace android {
@@ -606,10 +628,18 @@ userid_t fakeUid(const userid_t uid) {
 
 bool Is_Weaver(const std::string& spblob_path, const std::string& handle_str) {
 	printf("Is_Weaver\n");
-	std::string weaver_file = spblob_path + handle_str + ".weaver";
 	struct stat st;
-	if (stat(weaver_file.c_str(), &st) == 0)
-		return true;
+	std::vector<std::string> weaver_file_paths = {
+		spblob_path + handle_str + ".weaver",
+		spblob_path + "0" + handle_str + ".weaver",
+		spblob_path + "00" + handle_str + ".weaver"
+	};
+    for (auto& weaver_file : weaver_file_paths) {
+		if (stat(weaver_file.c_str(), &st) == 0) {
+			return true;
+			break;
+		}
+	}
 	return false;
 }
 

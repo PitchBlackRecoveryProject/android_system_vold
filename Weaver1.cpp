@@ -28,7 +28,10 @@
 //#include <keystore/authorization_set.h>
 //#include <keystore/keystore_hidl_support.h>
 
+#include <android/binder_manager.h>
+
 #include <android/hardware/weaver/1.0/IWeaver.h>
+#include <aidl/android/hardware/weaver/IWeaver.h>
 
 #include <iostream>
 #define ERROR 1
@@ -48,13 +51,27 @@ namespace android {
 namespace vold {
 
 Weaver::Weaver() {
-	mDevice = ::android::hardware::weaver::V1_0::IWeaver::getService();
+    const std::string instance = std::string(::aidl::android::hardware::weaver::IWeaver::descriptor) + "/default";
+    AIBinder* binder = AServiceManager_waitForService(instance.c_str());
+    mAidlDevice = ::aidl::android::hardware::weaver::IWeaver::fromBinder(ndk::SpAIBinder(binder));
+	if (mAidlDevice == nullptr) {
+		mDevice = ::android::hardware::weaver::V1_0::IWeaver::getService();
+	}
 	GottenConfig = false;
 }
 
 bool Weaver::GetConfig() {
 	if (GottenConfig)
 		return true;
+
+	if (mAidlDevice != nullptr) {
+		auto r = mAidlDevice->getConfig(&aidlConfig);
+		if (r.isOk()) {
+			GottenConfig = true;
+			return true;
+		}
+		return false;
+	}
 
 	WeaverStatus status;
 	WeaverConfig cfg;
@@ -76,6 +93,10 @@ bool Weaver::GetConfig() {
 bool Weaver::GetSlots(uint32_t* slots) {
 	if (!GetConfig())
 		return false;
+	if (mAidlDevice != nullptr) {
+		*slots = aidlConfig.slots;
+		return true;
+	}
 	*slots = config.slots;
 	return true;
 }
@@ -83,6 +104,10 @@ bool Weaver::GetSlots(uint32_t* slots) {
 bool Weaver::GetKeySize(uint32_t* keySize) {
 	if (!GetConfig())
 		return false;
+	if (mAidlDevice != nullptr) {
+		*keySize = aidlConfig.keySize;
+		return true;
+	}
 	*keySize = config.keySize;
 	return true;
 }
@@ -90,6 +115,10 @@ bool Weaver::GetKeySize(uint32_t* keySize) {
 bool Weaver::GetValueSize(uint32_t* valueSize) {
 	if (!GetConfig())
 		return false;
+	if (mAidlDevice != nullptr) {
+		*valueSize = aidlConfig.valueSize;
+		return true;
+	}
 	*valueSize = config.valueSize;
 	return true;
 }
@@ -111,6 +140,17 @@ bool Weaver::WeaverVerify(const uint32_t slot, const void* weaver_key, std::vect
 		key[index] = *ptr;
 		ptr++;
 	}
+	
+	if (mAidlDevice != nullptr) {
+		::aidl::android::hardware::weaver::WeaverReadResponse rep;
+		auto r = mAidlDevice->read(slot, key, &rep);
+		if (r.isOk() && rep.status == ::aidl::android::hardware::weaver::WeaverReadStatus::OK) {
+			*payload = rep.value;
+			return true;
+		}
+		return false;
+	}
+
 	const auto readRet = mDevice->read(slot, key, [&](WeaverReadStatus s, WeaverReadResponse r) {
 		callbackCalled = true;
 		status = s;

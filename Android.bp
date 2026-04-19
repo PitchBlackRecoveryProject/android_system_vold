@@ -36,6 +36,7 @@ cc_defaults {
         "android.hardware.gatekeeper@1.0",
         "android.hardware.keymaster@4.1",
         "android.hardware.weaver@1.0",
+        "android.hardware.weaver-V2-ndk",
         "android.security.apc-ndk",
         "android.hardware.health.storage@1.0",
         "android.hardware.health.storage-V1-ndk",
@@ -191,6 +192,7 @@ cc_library_static {
     whole_static_libs: [
         "libcom.android.sysprop.apex",
         "libc++fs",
+        "android.hardware.weaver-V2-ndk",
     ],
 }
 
