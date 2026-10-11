@@ -656,9 +656,18 @@ bool Decrypt_User_Synth_Pass(const userid_t user_id, const std::string& Password
 	sprintf(spblob_path_char, "/data/system_de/%d/spblob/", user_id);
 	std::string spblob_path = spblob_path_char;
 	long handle = 0;
+	struct stat st;
+	if (stat(spblob_path_char, &st) != 0) {
+		printf("No synthetic password for user %d (%s does not exist)\n", user_id, spblob_path_char);
+		return retval;
+	}
 	// Get the handle: https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/LockSettingsService.java#2017
 	KeystoreInfo keystore_info;
 	std::string handle_str = keystore_info.getHandle(user_id);
+	if (handle_str.empty()) {
+		printf("No synthetic password handle for user %d\n", user_id);
+		return retval;
+	}
 	// Now we begin driving unwrapPasswordBasedSyntheticPassword from: https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r23/services/core/java/com/android/server/locksettings/SyntheticPasswordManager.java#758
 	// First we read the password data which contains scrypt parameters
 	// printf("pwd N %i R %i P %i salt ", pwd.scryptN, pwd.scryptR, pwd.scryptP); output_hex((char*)pwd.salt, pwd.salt_len); printf("\n");
@@ -836,6 +845,10 @@ extern "C" int Get_Password_Type(const userid_t user_id, std::string& filename) 
 		KeystoreInfo keystore_info;
 		std::string handle_str = keystore_info.getHandle(user_id);
 		printf("Handle is '%s'\n", handle_str.c_str());
+		if (handle_str.empty()) {
+			printf("No synthetic password handle for user %d\n", user_id);
+			return 0;
+		}
 		password_data_struct pwd;
 		if (!Get_Password_Data(spblob_path, handle_str, &pwd)) {
 			printf("Failed to Get_Password_Data\n");

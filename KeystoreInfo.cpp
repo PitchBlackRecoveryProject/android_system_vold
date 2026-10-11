@@ -46,18 +46,45 @@ std::string KeystoreInfo::uint2hex(int64_t num) {
 
 std::string KeystoreInfo::getHandle(const userid_t user_id) {
 	int rc = 0;
-	sqlite3 *db;
+	sqlite3 *db = NULL;
 	sqlite3_stmt *stmt;
-	char *err_msg = 0;
+	const char *path = "/data/system/locksettings.db";
 
-	rc = sqlite3_open("/data/system/locksettings.db", &db);
-	if (rc) {
+	// Android creates this database during its first boot. Opening it with
+	// the default flags (read-write, create) would leave an empty root-owned
+	// file behind when that boot never got that far, and the ROM could not
+	// open its own database any more. Only read it, and only if it exists.
+	if (access(path, F_OK) != 0) {
+		fprintf(stderr, "%s does not exist\n", path);
+		return "";
+	}
+	rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, NULL);
+	if (rc != SQLITE_OK) {
 		fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
 		return "";
 	}
 	std::string sql = "SELECT * FROM locksettings WHERE name = 'sp-handle' AND user = " + std::to_string(user_id);
 	rc = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL);
+	if (rc != SQLITE_OK && sqlite3_extended_errcode(db) == SQLITE_READONLY_ROLLBACK) {
+		// An interrupted write left a hot rollback journal, which a read-only
+		// connection cannot roll back. Reopen read-write but without create
+		// (the file exists, see above) and let SQLite roll it back in place,
+		// as Android does on its next start. No file is created and the
+		// owner and label of the database do not change.
+		fprintf(stderr, "%s has a hot journal, rolling it back\n", path);
+		sqlite3_close(db);
+		db = NULL;
+		rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL);
+		if (rc != SQLITE_OK) {
+			fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+			sqlite3_close(db);
+			return "";
+		}
+		rc = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL);
+	}
 	if (rc != SQLITE_OK) {
+		fprintf(stderr, "Can't read %s: %s\n", path, sqlite3_errmsg(db));
 		sqlite3_close(db);
 		return "";
 	}
@@ -67,6 +94,8 @@ std::string KeystoreInfo::getHandle(const userid_t user_id) {
 	}
 	if (rc != SQLITE_DONE) {
 		fprintf(stderr, "error: %s\n", sqlite3_errmsg(db));
+		sqlite3_finalize(stmt);
+		sqlite3_close(db);
 		return "";
 	}
 	sqlite3_finalize(stmt);
